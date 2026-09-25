@@ -1,0 +1,8 @@
+{
+  "/api/assessments/start/route": "app/api/assessments/start/route.js",
+  "/user/dashboard/page": "app/user/dashboard/page.js",
+  "/login/page": "app/login/page.js",
+  "/admin/dashboard/page": "app/admin/dashboard/page.js",
+  "/admin/results/page": "app/admin/results/page.js",
+  "/admin/results/[id]/page": "app/admin/results/[id]/page.js"
+}

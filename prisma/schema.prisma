@@ -1,0 +1,166 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum AssessmentStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+model UserBatch {
+  id              String   @id @default(cuid())
+  fileName        String
+  batchName       String
+  totalCandidates Int      @default(0)
+  createdAt       DateTime @default(now())
+  users           User[]
+
+  @@index([createdAt])
+}
+
+model User {
+  id           String      @id @default(cuid())
+  name         String
+  email        String      @unique
+  passwordHash String
+  role         Role        @default(USER)
+  isActive     Boolean     @default(true)
+  batchId      String?
+  batch        UserBatch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  assessments  Assessment[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([email])
+  @@index([role])
+  @@index([batchId])
+}
+
+model Category {
+  id               String     @id @default(cuid())
+  name             String     @unique
+  questionQuantity Int        @default(0) // Quantity of questions to ask candidates from this category
+  questions        Question[]
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@index([name])
+}
+
+model Question {
+  id                  String               @id @default(cuid())
+  questionText        String               @db.Text
+  categoryId          String?
+  category            Category?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  difficulty          Difficulty           @default(MEDIUM)
+  isActive            Boolean              @default(true)
+  sourceFileName      String?
+  sourceImportId      String?
+  sourceImport        ImportBatch?         @relation(fields: [sourceImportId], references: [id], onDelete: SetNull)
+  options             QuestionOption[]
+  assessmentQuestions AssessmentQuestion[]
+  assessmentAnswers   AssessmentAnswer[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@index([isActive])
+  @@index([difficulty])
+  @@index([categoryId])
+}
+
+model QuestionOption {
+  id         String   @id @default(cuid())
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  optionKey  String   // A, B, C, D
+  optionText String   @db.Text
+  isCorrect  Boolean  @default(false)
+
+  @@index([questionId])
+}
+
+model ImportBatch {
+  id                String     @id @default(cuid())
+  fileName          String
+  fileType          String
+  totalQuestions    Int
+  validQuestions    Int
+  invalidQuestions  Int
+  importedQuestions Int
+  uploadedBy        String
+  createdAt         DateTime   @default(now())
+  questions         Question[]
+
+  @@index([createdAt])
+}
+
+model Assessment {
+  id                 String               @id @default(cuid())
+  userId             String
+  user               User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status             AssessmentStatus     @default(IN_PROGRESS)
+  totalQuestions     Int                  @default(50)
+  attemptedQuestions Int                  @default(0)
+  correctAnswers     Int                  @default(0)
+  incorrectAnswers   Int                  @default(0)
+  unanswered         Int                  @default(50)
+  score              Float                @default(0)
+  percentage         Float                @default(0)
+  startedAt          DateTime             @default(now())
+  durationMinutes    Int                  @default(60)
+  deadlineAt         DateTime?
+  submittedAt        DateTime?
+  submissionReason   String?
+  questions          AssessmentQuestion[]
+  answers            AssessmentAnswer[]
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([userId, status])
+  @@index([status, submittedAt])
+  @@index([deadlineAt])
+}
+
+model AssessmentQuestion {
+  id            String     @id @default(cuid())
+  assessmentId  String
+  assessment    Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  questionId    String
+  question      Question   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  questionOrder Int
+
+  @@unique([assessmentId, questionId])
+  @@unique([assessmentId, questionOrder])
+  @@index([assessmentId])
+}
+
+model AssessmentAnswer {
+  id             String     @id @default(cuid())
+  assessmentId   String
+  assessment     Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  questionId     String
+  question       Question   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  selectedOption String     // A, B, C, D
+  answeredAt     DateTime   @default(now())
+
+  @@unique([assessmentId, questionId])
+  @@index([assessmentId])
+}
