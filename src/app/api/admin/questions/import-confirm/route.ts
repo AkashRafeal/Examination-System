@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromCookies } from '@/lib/auth/session';
-import { Role, Difficulty } from '@prisma/client';
+import { getSessionFromCookies, hasAdminAccess } from '@/lib/auth/session';
+import { Difficulty } from '@prisma/client';
 import { confirmImportBatch } from '@/lib/services/question.service';
 import { RawParsedQuestion } from '@/lib/parsers/question-parser';
 import { z } from 'zod';
@@ -29,7 +29,7 @@ const confirmSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const session = await getSessionFromCookies();
-    if (!session || session.role !== Role.ADMIN) {
+    if (!session || !hasAdminAccess(session.role)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 403 });
     }
 
@@ -49,6 +49,7 @@ export async function POST(request: NextRequest) {
       fileName,
       fileType,
       uploadedBy: session.name || session.email,
+      createdById: session.userId,
       categoryId: categoryId || undefined,
       difficulty: (difficulty as Difficulty) || Difficulty.MEDIUM,
       questions: questions as RawParsedQuestion[],

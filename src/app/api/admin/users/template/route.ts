@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromCookies } from '@/lib/auth/session';
+import { getSessionFromCookies, hasAdminAccess } from '@/lib/auth/session';
 import { generateSampleCandidateTemplate } from '@/lib/services/user-import.service';
 
 export async function GET(request: NextRequest) {
   try {
     const session = await getSessionFromCookies();
-    if (!session || session.role !== 'ADMIN') {
+    if (!session || !hasAdminAccess(session.role)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 403 });
     }
 

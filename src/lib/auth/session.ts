@@ -1,7 +1,15 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
-export type Role = 'ADMIN' | 'USER';
+export type Role = 'SUPER_ADMIN' | 'ADMIN' | 'USER';
+
+export function hasAdminAccess(role?: string | null): boolean {
+  return role === 'ADMIN' || role === 'SUPER_ADMIN';
+}
+
+export function isSuperAdmin(role?: string | null): boolean {
+  return role === 'SUPER_ADMIN';
+}
 
 const COOKIE_NAME = 'examination_auth_token';
 const JWT_SECRET = new TextEncoder().encode(

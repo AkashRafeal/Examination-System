@@ -7,12 +7,31 @@ export async function getUsers(filters: {
   limit?: number;
   search?: string;
   batchId?: string;
+  role?: 'SUPER_ADMIN' | 'ADMIN' | 'USER';
+  actorRole?: string;
+  actorUserId?: string;
+  adminId?: string;
 }) {
   const page = filters.page || 1;
   const limit = filters.limit || 20;
   const skip = (page - 1) * limit;
 
   const where: Prisma.UserWhereInput = {};
+
+  if (filters.actorRole === 'ADMIN') {
+    // Regular admin can ONLY see USER (candidates) added by them
+    where.role = 'USER';
+    if (filters.actorUserId) {
+      (where as any).createdById = filters.actorUserId;
+    }
+  } else {
+    if (filters.role) {
+      where.role = filters.role as any;
+    }
+    if (filters.adminId) {
+      (where as any).createdById = filters.adminId;
+    }
+  }
 
   if (filters.batchId) {
     where.batchId = filters.batchId;
@@ -25,7 +44,7 @@ export async function getUsers(filters: {
     ];
   }
 
-  const [total, users] = await Promise.all([
+  const [total, users, admins] = await Promise.all([
     db.user.count({ where }),
     db.user.findMany({
       where,
@@ -38,7 +57,15 @@ export async function getUsers(filters: {
         email: true,
         role: true,
         isActive: true,
+        createdById: true,
         createdAt: true,
+        creator: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
         assessments: {
           take: 1,
           orderBy: { startedAt: 'desc' },
@@ -56,12 +83,20 @@ export async function getUsers(filters: {
             batchName: true,
           },
         },
-      },
+      } as any,
     }),
+    filters.actorRole === 'SUPER_ADMIN'
+      ? db.user.findMany({
+          where: { role: 'ADMIN' },
+          select: { id: true, name: true, email: true },
+          orderBy: { name: 'asc' },
+        })
+      : Promise.resolve([]),
   ]);
 
   return {
     users,
+    admins,
     pagination: {
       total,
       page,
@@ -71,15 +106,28 @@ export async function getUsers(filters: {
   };
 }
 
-export async function toggleUserStatus(id: string) {
-  const user = await db.user.findUnique({
+export async function toggleUserStatus(id: string, actorRole?: string, actorUserId?: string) {
+  const user: any = await db.user.findUnique({
     where: { id },
-    select: { isActive: true, role: true },
+    select: { isActive: true, role: true, createdById: true } as any,
   });
 
   if (!user) throw new Error('User not found');
+  
+  if (user.role === 'SUPER_ADMIN') {
+    throw new Error('Super Administrator accounts cannot be deactivated.');
+  }
+
+  if (actorRole === 'ADMIN') {
+    if (user.role !== 'USER' || user.createdById !== actorUserId) {
+      throw new Error('Unauthorized: You can only modify candidates added by you.');
+    }
+  }
+
   if (user.role === 'ADMIN') {
-    throw new Error('Cannot deactivate admin account');
+    if (actorRole !== 'SUPER_ADMIN') {
+      throw new Error('Unauthorized: Only Super Administrators can deactivate or activate Administrator accounts.');
+    }
   }
 
   return db.user.update({
@@ -88,18 +136,30 @@ export async function toggleUserStatus(id: string) {
   });
 }
 
-export async function deleteUser(id: string, currentUserId?: string) {
-  const user = await db.user.findUnique({
+export async function deleteUser(id: string, currentUserId?: string, actorRole?: string) {
+  const user: any = await db.user.findUnique({
     where: { id },
-    select: { id: true, name: true, role: true, batchId: true },
+    select: { id: true, name: true, role: true, batchId: true, createdById: true } as any,
   });
 
   if (!user) throw new Error('User not found');
   if (currentUserId && id === currentUserId) {
-    throw new Error('You cannot delete your own logged-in administrator account');
+    throw new Error('You cannot delete your own logged-in account.');
   }
+  if ((user.role as string) === 'SUPER_ADMIN') {
+    throw new Error('Super Administrator accounts cannot be deleted.');
+  }
+
+  if (actorRole === 'ADMIN') {
+    if (user.role !== 'USER' || (user as any).createdById !== currentUserId) {
+      throw new Error('Unauthorized: You can only delete candidates added by you.');
+    }
+  }
+
   if (user.role === 'ADMIN') {
-    throw new Error('Administrator accounts cannot be deleted');
+    if (actorRole !== 'SUPER_ADMIN') {
+      throw new Error('Unauthorized: Only Super Administrators can delete Administrator accounts.');
+    }
   }
 
   const res = await db.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -147,7 +207,8 @@ export async function deleteUsers(
         batchId?: string | null;
         search?: string;
       },
-  currentUserId?: string
+  currentUserId?: string,
+  actorRole?: string
 ) {
   let ids: string[] | undefined;
   let all = false;
@@ -163,10 +224,14 @@ export async function deleteUsers(
     search = param.search;
   }
 
-  const where: Prisma.UserWhereInput = {
+  const where: any = {
     role: 'USER',
     ...(currentUserId ? { NOT: { id: currentUserId } } : {}),
   };
+
+  if (actorRole === 'ADMIN' && currentUserId) {
+    where.createdById = currentUserId;
+  }
 
   if (!all && ids && ids.length > 0) {
     where.id = { in: ids };
@@ -237,21 +302,34 @@ export async function deleteUsers(
   return res;
 }
 
-export async function createCandidateUser(data: {
-  name: string;
-  email: string;
-  password?: string;
-  batchId?: string | null;
-}) {
+export async function createUser(
+  data: {
+    name: string;
+    email: string;
+    password?: string;
+    role?: 'ADMIN' | 'USER';
+    batchId?: string | null;
+  },
+  creatorRole?: string,
+  createdById?: string
+) {
+  const targetRole = data.role || 'USER';
+
+  if (targetRole === 'ADMIN') {
+    if (creatorRole !== 'SUPER_ADMIN') {
+      throw new Error('Unauthorized: Only Super Administrators can create Administrator accounts.');
+    }
+  }
+
   const trimmedName = data.name.trim();
   const normalizedEmail = data.email.trim().toLowerCase();
 
   if (!trimmedName) {
-    throw new Error('Candidate name is required.');
+    throw new Error(targetRole === 'ADMIN' ? 'Administrator name is required.' : 'Candidate name is required.');
   }
 
   if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-    throw new Error('A valid candidate email address is required.');
+    throw new Error('A valid email address is required.');
   }
 
   // Check if user already exists
@@ -267,12 +345,16 @@ export async function createCandidateUser(data: {
   // Determine password
   let plainPassword = data.password?.trim();
   if (!plainPassword) {
-    const firstName =
-      trimmedName
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '')
-        .split(/\s+/)[0] || 'candidate';
-    plainPassword = `${firstName}@123`;
+    if (targetRole === 'ADMIN') {
+      plainPassword = 'Admin@' + Math.floor(100000 + Math.random() * 900000);
+    } else {
+      const firstName =
+        trimmedName
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '')
+          .split(/\s+/)[0] || 'candidate';
+      plainPassword = `${firstName}@123`;
+    }
   }
 
   if (plainPassword.length < 6) {
@@ -284,7 +366,7 @@ export async function createCandidateUser(data: {
 
   // Validate batchId if provided
   let validBatchId: string | null = null;
-  if (data.batchId && data.batchId !== 'NONE' && data.batchId !== '') {
+  if (targetRole === 'USER' && data.batchId && data.batchId !== 'NONE' && data.batchId !== '') {
     const batch = await db.userBatch.findUnique({
       where: { id: data.batchId },
       select: { id: true },
@@ -299,10 +381,11 @@ export async function createCandidateUser(data: {
       name: trimmedName,
       email: normalizedEmail,
       passwordHash,
-      role: 'USER',
+      role: targetRole as any,
       isActive: true,
       batchId: validBatchId,
-    },
+      createdById: createdById || null,
+    } as any,
     select: {
       id: true,
       name: true,
@@ -310,13 +393,14 @@ export async function createCandidateUser(data: {
       role: true,
       isActive: true,
       createdAt: true,
+      createdById: true,
       batch: {
         select: {
           id: true,
           batchName: true,
         },
       },
-    },
+    } as any,
   });
 
   // If assigned to a batch, increment totalCandidates count
@@ -324,11 +408,20 @@ export async function createCandidateUser(data: {
     await db.userBatch.update({
       where: { id: validBatchId },
       data: { totalCandidates: { increment: 1 } },
-    });
+    }).catch(() => {});
   }
 
   return {
     user,
     plainPassword,
   };
+}
+
+export async function createCandidateUser(data: {
+  name: string;
+  email: string;
+  password?: string;
+  batchId?: string | null;
+}) {
+  return createUser({ ...data, role: 'USER' });
 }

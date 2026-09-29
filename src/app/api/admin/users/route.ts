@@ -1,20 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromCookies } from '@/lib/auth/session';
-import { Role } from '@prisma/client';
-import { getUsers, createCandidateUser, deleteUsers } from '@/lib/services/user.service';
+import { getSessionFromCookies, hasAdminAccess } from '@/lib/auth/session';
+import { getUsers, createUser, deleteUsers } from '@/lib/services/user.service';
 import { z } from 'zod';
 
-const createCandidateSchema = z.object({
-  name: z.string().min(1, 'Candidate name is required'),
+const createUserSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
   email: z.string().email('Please enter a valid email address'),
   password: z.string().min(6, 'Password must be at least 6 characters').optional().or(z.literal('')),
+  role: z.enum(['ADMIN', 'USER']).optional().default('USER'),
   batchId: z.string().optional().nullable(),
 });
 
 export async function GET(request: NextRequest) {
   try {
     const session = await getSessionFromCookies();
-    if (!session || session.role !== Role.ADMIN) {
+    if (!session || !hasAdminAccess(session.role)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 403 });
     }
 
@@ -23,8 +23,20 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20', 10);
     const search = searchParams.get('search') || undefined;
     const batchId = searchParams.get('batchId') || undefined;
+    const roleParam = searchParams.get('role');
+    const role = (roleParam === 'SUPER_ADMIN' || roleParam === 'ADMIN' || roleParam === 'USER') ? roleParam : undefined;
+    const adminId = searchParams.get('adminId') || undefined;
 
-    const data = await getUsers({ page, limit, search, batchId });
+    const data = await getUsers({
+      page,
+      limit,
+      search,
+      batchId,
+      role,
+      actorRole: session.role,
+      actorUserId: session.userId,
+      adminId,
+    });
     return NextResponse.json(data);
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -34,12 +46,12 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const session = await getSessionFromCookies();
-    if (!session || session.role !== Role.ADMIN) {
+    if (!session || !hasAdminAccess(session.role)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 403 });
     }
 
     const body = await request.json();
-    const result = createCandidateSchema.safeParse(body);
+    const result = createUserSchema.safeParse(body);
 
     if (!result.success) {
       return NextResponse.json(
@@ -48,26 +60,40 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const created = await createCandidateUser({
-      name: result.data.name,
-      email: result.data.email,
-      password: result.data.password || undefined,
-      batchId: result.data.batchId || null,
-    });
+    // Strict Enforcement: Only Super Administrator can create Administrator accounts
+    if (result.data.role === 'ADMIN' && session.role !== 'SUPER_ADMIN') {
+      return NextResponse.json(
+        { error: 'Forbidden: Only Super Administrators have permission to create Administrator accounts.' },
+        { status: 403 }
+      );
+    }
 
+    const created = await createUser(
+      {
+        name: result.data.name,
+        email: result.data.email,
+        password: result.data.password || undefined,
+        role: result.data.role,
+        batchId: result.data.batchId || null,
+      },
+      session.role,
+      session.userId
+    );
+
+    const roleLabel = (created.user as any).role === 'ADMIN' ? 'Administrator' : 'Candidate';
     return NextResponse.json(
       {
         success: true,
-        message: `Candidate ${created.user.name} created successfully.`,
+        message: `${roleLabel} ${created.user.name} created successfully.`,
         user: created.user,
         plainPassword: created.plainPassword,
       },
       { status: 201 }
     );
   } catch (error: any) {
-    console.error('Error creating student user:', error);
+    console.error('Error creating user:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to create student' },
+      { error: error.message || 'Failed to create user' },
       { status: error.message?.includes('already exists') ? 409 : 500 }
     );
   }
@@ -76,7 +102,7 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const session = await getSessionFromCookies();
-    if (!session || session.role !== Role.ADMIN) {
+    if (!session || !hasAdminAccess(session.role)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 403 });
     }
 
@@ -94,7 +120,8 @@ export async function DELETE(request: NextRequest) {
       all
         ? { all: true, batchId: batchId || undefined, search }
         : { ids: userIds },
-      session.userId
+      session.userId,
+      session.role
     );
     return NextResponse.json({
       success: true,

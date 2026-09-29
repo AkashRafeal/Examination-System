@@ -20,7 +20,7 @@ export default function HomePage() {
           </h1>
 
           <p className="mt-6 text-lg sm:text-xl text-slate-600 max-w-2xl mx-auto leading-relaxed">
-            Automated PDF/DOCX question ingestion with staged preview, 50-question server-side
+            Automated PDF/DOCX question ingestion with staged preview, server-side question
             randomization, atomic evaluation, and complete privacy protection.
           </p>
 

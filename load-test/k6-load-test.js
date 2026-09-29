@@ -15,7 +15,7 @@ export const options = {
   },
 };
 
-const BASE_URL = __ENV.LOAD_TEST_URL || 'http://localhost:3001';
+const BASE_URL = __ENV.LOAD_TEST_URL || 'http://localhost:3002';
 
 export default function () {
   const userNum = (__VU % 1000) + 1;

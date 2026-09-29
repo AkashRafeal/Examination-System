@@ -39,7 +39,7 @@ export async function middleware(request: NextRequest) {
       loginUrl.searchParams.set('redirect', pathname);
       return NextResponse.redirect(loginUrl);
     }
-    if (session.role !== 'ADMIN') {
+    if (session.role !== 'ADMIN' && session.role !== 'SUPER_ADMIN') {
       return NextResponse.redirect(new URL('/user/dashboard', request.url));
     }
     return NextResponse.next();

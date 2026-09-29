@@ -24,16 +24,36 @@ export async function GET() {
       },
     });
 
-    // Query admin question configuration across categories
-    const configuredCategories = await db.category.findMany({
-      where: { questionQuantity: { gt: 0 } },
-      select: {
-        id: true,
-        name: true,
-        questionQuantity: true,
-      },
-      orderBy: { name: 'asc' },
+    // Check candidate user's creator admin to serve their configured questions
+    const candidateUser: any = await db.user.findUnique({
+      where: { id: session.userId },
+      select: { createdById: true } as any,
     });
+    const adminCreatorId = candidateUser?.createdById;
+
+    let configuredCategories = adminCreatorId
+      ? await db.category.findMany({
+          where: { questionQuantity: { gt: 0 }, createdById: adminCreatorId } as any,
+          select: {
+            id: true,
+            name: true,
+            questionQuantity: true,
+          },
+          orderBy: { name: 'asc' },
+        })
+      : [];
+
+    if (configuredCategories.length === 0) {
+      configuredCategories = await db.category.findMany({
+        where: { questionQuantity: { gt: 0 } },
+        select: {
+          id: true,
+          name: true,
+          questionQuantity: true,
+        },
+        orderBy: { name: 'asc' },
+      });
+    }
 
     const totalConfiguredQuestions = configuredCategories.reduce(
       (acc, c) => acc + c.questionQuantity,

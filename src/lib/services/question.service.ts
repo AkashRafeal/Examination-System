@@ -14,6 +14,7 @@ export interface QuestionFilters {
   categoryId?: string;
   difficulty?: Difficulty;
   isActive?: boolean;
+  createdById?: string;
 }
 
 export async function getQuestions(filters: QuestionFilters) {
@@ -42,6 +43,10 @@ export async function getQuestions(filters: QuestionFilters) {
     where.isActive = filters.isActive;
   }
 
+  if (filters.createdById) {
+    (where as any).createdById = filters.createdById;
+  }
+
   const [total, questions] = await Promise.all([
     db.question.count({ where }),
     db.question.findMany({
@@ -51,10 +56,13 @@ export async function getQuestions(filters: QuestionFilters) {
       orderBy: { createdAt: 'desc' },
       include: {
         category: true,
+        creator: {
+          select: { id: true, name: true, email: true },
+        },
         options: {
           orderBy: { optionKey: 'asc' },
         },
-      },
+      } as any,
     }),
   ]);
 
@@ -74,10 +82,13 @@ export async function getQuestionById(id: string) {
     where: { id },
     include: {
       category: true,
+      creator: {
+        select: { id: true, name: true, email: true },
+      },
       options: {
         orderBy: { optionKey: 'asc' },
       },
-    },
+    } as any,
   });
 }
 
@@ -86,6 +97,7 @@ export async function createQuestion(data: {
   categoryId?: string | null;
   difficulty?: Difficulty;
   isActive?: boolean;
+  createdById?: string | null;
   options: { key: string; text: string; isCorrect: boolean }[];
 }) {
   return db.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -95,7 +107,8 @@ export async function createQuestion(data: {
         categoryId: data.categoryId || null,
         difficulty: data.difficulty || Difficulty.MEDIUM,
         isActive: data.isActive !== undefined ? data.isActive : true,
-      },
+        createdById: data.createdById || null,
+      } as any,
     });
 
     await tx.questionOption.createMany({
@@ -170,6 +183,7 @@ export async function deleteQuestions(
         categoryId?: string | null;
         search?: string;
         isActive?: boolean;
+        createdById?: string;
       }
 ) {
   let ids: string[] | undefined;
@@ -177,6 +191,7 @@ export async function deleteQuestions(
   let categoryId: string | null | undefined;
   let search: string | undefined;
   let isActive: boolean | undefined;
+  let createdById: string | undefined;
 
   if (Array.isArray(param)) {
     ids = param;
@@ -186,9 +201,14 @@ export async function deleteQuestions(
     categoryId = param.categoryId;
     search = param.search;
     isActive = param.isActive;
+    createdById = param.createdById;
   }
 
-  const where: Prisma.QuestionWhereInput = {};
+  const where: any = {};
+
+  if (createdById) {
+    where.createdById = createdById;
+  }
 
   if (!all && ids && ids.length > 0) {
     where.id = { in: ids };
@@ -247,24 +267,38 @@ export async function toggleQuestionStatus(id: string) {
   return res;
 }
 
-export async function getCategories() {
+export async function getCategories(createdById?: string) {
+  const where: any = {};
+  if (createdById) {
+    where.createdById = createdById;
+  }
+
   const categories = await db.category.findMany({
+    where,
     orderBy: { name: 'asc' },
     include: {
+      creator: {
+        select: { id: true, name: true, email: true },
+      },
       _count: {
         select: { questions: true },
       },
       questions: {
-        where: { isActive: true },
+        where: {
+          isActive: true,
+          ...(createdById ? { createdById } : {}),
+        },
         select: { id: true },
       },
-    },
+    } as any,
   });
 
   return categories.map((c: any) => ({
     id: c.id,
     name: c.name,
     questionQuantity: c.questionQuantity,
+    createdById: c.createdById,
+    creator: c.creator,
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
     _count: c._count,
@@ -272,18 +306,32 @@ export async function getCategories() {
   }));
 }
 
-export async function createCategory(name: string, questionQuantity?: number) {
+export async function createCategory(name: string, questionQuantity?: number, createdById?: string | null) {
   const trimmed = name.trim();
   const qty = typeof questionQuantity === 'number' ? Math.max(0, questionQuantity) : 0;
-  return db.category.upsert({
-    where: { name: trimmed },
-    update: {
-      ...(typeof questionQuantity === 'number' ? { questionQuantity: qty } : {}),
+
+  const existing = await db.category.findFirst({
+    where: {
+      name: trimmed,
+      ...(createdById ? { createdById } : {}),
     },
-    create: {
+  });
+
+  if (existing) {
+    return db.category.update({
+      where: { id: existing.id },
+      data: {
+        ...(typeof questionQuantity === 'number' ? { questionQuantity: qty } : {}),
+      },
+    });
+  }
+
+  return db.category.create({
+    data: {
       name: trimmed,
       questionQuantity: qty,
-    },
+      createdById: createdById || null,
+    } as any,
   });
 }
 
@@ -328,6 +376,7 @@ export async function confirmImportBatch(params: {
   fileName: string;
   fileType: string;
   uploadedBy: string;
+  createdById?: string | null;
   categoryId?: string | null;
   difficulty?: Difficulty;
   questions: RawParsedQuestion[];
@@ -345,6 +394,7 @@ export async function confirmImportBatch(params: {
         invalidQuestions: params.questions.length - validQuestions.length,
         importedQuestions: validQuestions.length,
         uploadedBy: params.uploadedBy,
+        createdById: params.createdById || null,
       },
     });
 
@@ -356,6 +406,7 @@ export async function confirmImportBatch(params: {
           categoryId: params.categoryId || null,
           difficulty: params.difficulty || Difficulty.MEDIUM,
           isActive: true,
+          createdById: params.createdById || null,
           sourceFileName: params.fileName,
           sourceImportId: createdBatch.id,
         },
@@ -378,13 +429,30 @@ export async function confirmImportBatch(params: {
   return batch;
 }
 
-export async function getImportBatches() {
+export async function getImportBatches(createdById?: string) {
+  const where: any = {};
+  if (createdById) {
+    where.createdById = createdById;
+  }
   return db.importBatch.findMany({
+    where,
     orderBy: { createdAt: 'desc' },
   });
 }
 
-export async function getDashboardStats() {
+export async function getDashboardStats(createdById?: string) {
+  const userCondition: any = { role: 'USER' };
+  const assessmentCondition: any = {};
+  const questionCondition: any = {};
+  const categoryCondition: any = {};
+
+  if (createdById) {
+    userCondition.createdById = createdById;
+    assessmentCondition.user = { createdById };
+    questionCondition.createdById = createdById;
+    categoryCondition.createdById = createdById;
+  }
+
   const [
     totalQuestions,
     activeQuestions,
@@ -396,18 +464,20 @@ export async function getDashboardStats() {
     recentAssessments,
     completedAggregation,
   ] = await Promise.all([
-    db.question.count(),
-    db.question.count({ where: { isActive: true } }),
-    db.question.count({ where: { isActive: false } }),
-    db.user.count({ where: { role: 'USER' } }),
-    db.assessment.count(),
-    db.assessment.count({ where: { status: 'COMPLETED' } }),
+    db.question.count({ where: questionCondition }),
+    db.question.count({ where: { ...questionCondition, isActive: true } }),
+    db.question.count({ where: { ...questionCondition, isActive: false } }),
+    db.user.count({ where: userCondition }),
+    db.assessment.count({ where: assessmentCondition }),
+    db.assessment.count({ where: { ...assessmentCondition, status: 'COMPLETED' } }),
     db.category.findMany({
+      where: categoryCondition,
       include: {
         _count: { select: { questions: true } },
       },
     }),
     db.assessment.findMany({
+      where: assessmentCondition,
       take: 10,
       orderBy: { startedAt: 'desc' },
       include: {
@@ -415,7 +485,7 @@ export async function getDashboardStats() {
       },
     }),
     db.assessment.aggregate({
-      where: { status: 'COMPLETED' },
+      where: { ...assessmentCondition, status: 'COMPLETED' },
       _avg: {
         score: true,
         percentage: true,

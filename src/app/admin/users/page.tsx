@@ -35,9 +35,14 @@ interface UserItem {
   id: string;
   name: string;
   email: string;
-  role: 'ADMIN' | 'USER';
+  role: 'SUPER_ADMIN' | 'ADMIN' | 'USER';
   isActive: boolean;
   createdAt: string;
+  creator?: {
+    id: string;
+    name: string;
+    email: string;
+  } | null;
   batch?: {
     id: string;
     batchName: string;
@@ -61,8 +66,11 @@ interface GeneratedCredential {
 }
 
 export default function AdminUsersPage() {
-  const [currentUser, setCurrentUser] = useState<{ id: string; email: string; name: string } | null>(null);
+  const [currentUser, setCurrentUser] = useState<{ id: string; email: string; name: string; role: 'SUPER_ADMIN' | 'ADMIN' | 'USER' } | null>(null);
   const [users, setUsers] = useState<UserItem[]>([]);
+  const [selectedRole, setSelectedRole] = useState<'ALL' | 'USER' | 'ADMIN' | 'SUPER_ADMIN'>('ALL');
+  const [selectedAdminId, setSelectedAdminId] = useState('');
+  const [availableAdmins, setAvailableAdmins] = useState<{ id: string; name: string; email: string }[]>([]);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
 
@@ -123,11 +131,16 @@ export default function AdminUsersPage() {
       params.set('limit', '15');
       if (search) params.set('search', search);
       if (selectedBatchId) params.set('batchId', selectedBatchId);
+      if (selectedRole !== 'ALL') params.set('role', selectedRole);
+      if (selectedAdminId) params.set('adminId', selectedAdminId);
 
       const res = await fetch(`/api/admin/users?${params.toString()}`);
       const data = await res.json();
 
       setUsers(data.users || []);
+      if (data.admins) {
+        setAvailableAdmins(data.admins);
+      }
       setTotalPages(data.pagination?.totalPages || 1);
       setTotalUsers(data.pagination?.total || 0);
     } catch (err) {
@@ -135,7 +148,7 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, selectedBatchId]);
+  }, [page, search, selectedBatchId, selectedRole, selectedAdminId]);
 
   useEffect(() => {
     fetchUsers();
@@ -177,7 +190,7 @@ export default function AdminUsersPage() {
   const selectedBatchObj = availableBatches.find((b) => b.id === selectedBatchId);
   const batchScopeLabel = selectedBatchObj ? `"${selectedBatchObj.batchName}"` : 'All Batches';
 
-  const selectableUsers = users.filter((u) => u.role !== 'ADMIN');
+  const selectableUsers = users.filter((u) => u.role === 'USER');
   const isAllCandidatesOnPageSelected =
     selectableUsers.length > 0 &&
     (selectAllAcrossPages || selectableUsers.every((u) => selectedUserIds.includes(u.id)));
@@ -256,7 +269,15 @@ export default function AdminUsersPage() {
   const handleDeleteUser = async () => {
     if (!userToDelete) return;
     if (currentUser && (userToDelete.id === currentUser.id || userToDelete.email === currentUser.email)) {
-      setDeleteError('You cannot delete your own logged-in administrator account.');
+      setDeleteError('You cannot delete your own logged-in account.');
+      return;
+    }
+    if (userToDelete.role === 'SUPER_ADMIN') {
+      setDeleteError('Super Administrator accounts cannot be deleted.');
+      return;
+    }
+    if (userToDelete.role === 'ADMIN' && currentUser?.role !== 'SUPER_ADMIN') {
+      setDeleteError('Only Super Administrators have permission to delete Administrator accounts.');
       return;
     }
     setIsDeleting(true);
@@ -438,8 +459,12 @@ Portal URL: ${origin}/login`;
   };
 
   const handleToggleStatus = async (id: string, currentRole: string) => {
-    if (currentRole === 'ADMIN') {
-      alert('Administrator accounts cannot be deactivated.');
+    if (currentRole === 'SUPER_ADMIN') {
+      alert('Super Administrator accounts cannot be deactivated.');
+      return;
+    }
+    if (currentRole === 'ADMIN' && currentUser?.role !== 'SUPER_ADMIN') {
+      alert('Only Super Administrators have permission to deactivate or activate Administrator accounts.');
       return;
     }
 
@@ -449,10 +474,102 @@ Portal URL: ${origin}/login`;
       });
       if (res.ok) {
         fetchUsers();
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Failed to update user status.');
       }
     } catch (err) {
       console.error('Error toggling user status:', err);
     }
+  };
+
+  // Add Administrator (Super Admin Only) States & Handlers
+  const [isAddAdminOpen, setIsAddAdminOpen] = useState(false);
+  const [adminName, setAdminName] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
+  const [isSubmittingAdmin, setIsSubmittingAdmin] = useState(false);
+  const [addAdminError, setAddAdminError] = useState('');
+  const [createdAdminResult, setCreatedAdminResult] = useState<{
+    user: { id: string; name: string; email: string; role: string };
+    plainPassword: string;
+  } | null>(null);
+  const [copiedAdminCreds, setCopiedAdminCreds] = useState(false);
+
+  const resetAddAdminModal = () => {
+    setAdminName('');
+    setAdminEmail('');
+    setAdminPassword('');
+    setShowAdminPassword(false);
+    setAddAdminError('');
+    setCreatedAdminResult(null);
+    setCopiedAdminCreds(false);
+  };
+
+  const handleCreateAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedName = adminName.trim();
+    const trimmedEmail = adminEmail.trim().toLowerCase();
+
+    if (!trimmedName) {
+      setAddAdminError('Administrator full name is required.');
+      return;
+    }
+    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setAddAdminError('Please enter a valid administrator email address.');
+      return;
+    }
+    if (adminPassword && adminPassword.trim().length < 6) {
+      setAddAdminError('Password must be at least 6 characters.');
+      return;
+    }
+
+    setIsSubmittingAdmin(true);
+    setAddAdminError('');
+
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: trimmedName,
+          email: trimmedEmail,
+          password: adminPassword.trim() || undefined,
+          role: 'ADMIN',
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to create administrator account.');
+      }
+
+      setCreatedAdminResult({
+        user: data.user,
+        plainPassword: data.plainPassword,
+      });
+
+      fetchUsers();
+    } catch (err: any) {
+      setAddAdminError(err.message || 'Error creating administrator.');
+    } finally {
+      setIsSubmittingAdmin(false);
+    }
+  };
+
+  const handleCopyAdminCredentials = () => {
+    if (!createdAdminResult) return;
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const text = `Administrator Login Credentials:
+Name: ${createdAdminResult.user.name}
+Email: ${createdAdminResult.user.email}
+Password: ${createdAdminResult.plainPassword}
+Role: Administrator
+Portal URL: ${origin}/login`;
+
+    navigator.clipboard.writeText(text);
+    setCopiedAdminCreds(true);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -533,7 +650,9 @@ Portal URL: ${origin}/login`;
             User Management
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Manage candidate access permissions, review assessment statuses, and provision accounts ({totalUsers} total)
+            {currentUser?.role === 'SUPER_ADMIN'
+              ? `Manage candidate access permissions and administrator accounts (${totalUsers} total)`
+              : `Manage candidates enrolled by you (${totalUsers} total)`}
           </p>
         </div>
 
@@ -582,6 +701,19 @@ Portal URL: ${origin}/login`;
                 <span>Cancel</span>
               </button>
             </>
+          )}
+
+          {currentUser?.role === 'SUPER_ADMIN' && (
+            <button
+              onClick={() => {
+                resetAddAdminModal();
+                setIsAddAdminOpen(true);
+              }}
+              className="inline-flex items-center px-4 py-2.5 rounded-xl font-bold text-white bg-purple-600 hover:bg-purple-700 shadow-md shadow-purple-600/20 transition-all text-sm space-x-2"
+            >
+              <Shield className="w-4 h-4" />
+              <span>Add Administrator</span>
+            </button>
           )}
 
           <button
@@ -641,10 +773,10 @@ Portal URL: ${origin}/login`;
 
       {/* Search & Batch Filters Toolbar */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-3">
           <div className="flex items-center gap-2 min-w-0">
             <Layers className="w-4 h-4 text-blue-500 shrink-0" />
-            <span className="text-sm font-bold text-slate-700 shrink-0">Filter by Batch:</span>
+            <span className="text-sm font-bold text-slate-700 shrink-0">Batch:</span>
           </div>
 
           <select
@@ -655,7 +787,7 @@ Portal URL: ${origin}/login`;
               setSelectAllAcrossPages(false);
               setPage(1);
             }}
-            className="flex-1 sm:max-w-md px-3 py-2 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-slate-800"
+            className="flex-1 lg:max-w-xs px-3 py-2 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-slate-800"
           >
             <option value="">— All Batches —</option>
             {availableBatches
@@ -667,11 +799,59 @@ Portal URL: ${origin}/login`;
               ))}
           </select>
 
-          <div className="relative flex-1 sm:max-w-xs sm:ml-auto">
+          {currentUser?.role === 'SUPER_ADMIN' && (
+            <>
+              <div className="flex items-center gap-2 min-w-0 sm:ml-2">
+                <Shield className="w-4 h-4 text-purple-500 shrink-0" />
+                <span className="text-sm font-bold text-slate-700 shrink-0">Role:</span>
+              </div>
+
+              <select
+                value={selectedRole}
+                onChange={(e) => {
+                  setSelectedRole(e.target.value as any);
+                  setSelectedUserIds([]);
+                  setSelectAllAcrossPages(false);
+                  setPage(1);
+                }}
+                className="px-3 py-2 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white text-slate-800"
+              >
+                <option value="ALL">All Roles</option>
+                <option value="USER">Candidates Only</option>
+                <option value="ADMIN">Administrators Only</option>
+                <option value="SUPER_ADMIN">Super Admins Only</option>
+              </select>
+
+              <div className="flex items-center gap-2 min-w-0 sm:ml-2">
+                <Users className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span className="text-sm font-bold text-slate-700 shrink-0">Admin:</span>
+              </div>
+
+              <select
+                value={selectedAdminId}
+                onChange={(e) => {
+                  setSelectedAdminId(e.target.value);
+                  setSelectedUserIds([]);
+                  setSelectAllAcrossPages(false);
+                  setPage(1);
+                }}
+                className="px-3 py-2 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white text-slate-800"
+              >
+                <option value="">All Admins (All Students)</option>
+                {availableAdmins.map((adm) => (
+                  <option key={adm.id} value={adm.id}>
+                    Admin: {adm.name} ({adm.email})
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+
+          <div className="relative flex-1 lg:max-w-xs lg:ml-auto">
             <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
             <input
               type="text"
-              placeholder="Search candidate name or email..."
+              placeholder="Search user name or email..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -812,7 +992,12 @@ Portal URL: ${origin}/login`;
                     </th>
                   )}
                   <th className={`py-3.5 ${!isDeleteMode ? 'pl-6 pr-4' : 'px-4'} whitespace-nowrap text-left`}>Candidate</th>
-                  <th className="py-3.5 px-4 whitespace-nowrap text-left">Role</th>
+                  {currentUser?.role === 'SUPER_ADMIN' && (
+                    <th className="py-3.5 px-4 whitespace-nowrap text-left">Role</th>
+                  )}
+                  {currentUser?.role === 'SUPER_ADMIN' && (
+                    <th className="py-3.5 px-4 whitespace-nowrap text-left">Enrolled By (Admin)</th>
+                  )}
                   <th className="py-3.5 px-4 whitespace-nowrap text-left">Account</th>
                   <th className="py-3.5 px-4 whitespace-nowrap text-left">Exam Status</th>
                   <th className="py-3.5 px-4 whitespace-nowrap text-left">Score</th>
@@ -825,8 +1010,11 @@ Portal URL: ${origin}/login`;
                 {users.map((u) => {
                   const latestExam = u.assessments && u.assessments[0];
                   const isSelected = selectedUserIds.includes(u.id);
-                  const isSelf = currentUser ? (u.id === currentUser.id || u.email === currentUser.email) : (u.role === 'ADMIN');
-                  const isCandidate = u.role !== 'ADMIN';
+                  const isSelf = currentUser ? (u.id === currentUser.id || u.email === currentUser.email) : false;
+                  const isSuperAdminAccount = u.role === 'SUPER_ADMIN';
+                  const isAdminAccount = u.role === 'ADMIN';
+                  const isCandidate = u.role === 'USER';
+                  const canManageUser = currentUser?.role === 'SUPER_ADMIN' ? (!isSelf && !isSuperAdminAccount) : (isCandidate && !isSelf);
                   return (
                     <tr
                       key={u.id}
@@ -867,25 +1055,45 @@ Portal URL: ${origin}/login`;
                         )}
                       </td>
 
-                      <td className="py-4 px-4 whitespace-nowrap">
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
-                            u.role === 'ADMIN'
-                              ? 'bg-purple-100 text-purple-700 border border-purple-200'
-                              : 'bg-blue-100 text-blue-700 border border-blue-200'
-                          }`}
-                        >
-                          {u.role}
-                        </span>
-                      </td>
+                      {currentUser?.role === 'SUPER_ADMIN' && (
+                        <td className="py-4 px-4 whitespace-nowrap">
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                              u.role === 'SUPER_ADMIN'
+                                ? 'bg-amber-100 text-amber-800 border border-amber-300 font-extrabold'
+                                : u.role === 'ADMIN'
+                                ? 'bg-purple-100 text-purple-700 border border-purple-200 font-bold'
+                                : 'bg-blue-100 text-blue-700 border border-blue-200 font-bold'
+                            }`}
+                          >
+                            {u.role === 'SUPER_ADMIN' ? '👑 SUPER ADMIN' : u.role}
+                          </span>
+                        </td>
+                      )}
+
+                      {currentUser?.role === 'SUPER_ADMIN' && (
+                        <td className="py-4 px-4 whitespace-nowrap">
+                          {u.creator ? (
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-slate-800 flex items-center gap-1">
+                                <Shield className="w-3 h-3 text-emerald-600" />
+                                {u.creator.name}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-mono">{u.creator.email}</span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400 italic">System / Direct</span>
+                          )}
+                        </td>
+                      )}
 
                       <td className="py-4 px-4 whitespace-nowrap">
                         <button
                           onClick={() => handleToggleStatus(u.id, u.role)}
-                          disabled={u.role === 'ADMIN'}
+                          disabled={!canManageUser}
                           className={`inline-flex items-center space-x-1 text-xs font-bold px-2.5 py-1 rounded-full transition-colors ${
-                            u.role === 'ADMIN'
-                              ? 'bg-emerald-50 text-emerald-700 cursor-default'
+                            !canManageUser
+                              ? 'bg-slate-100 text-slate-500 cursor-default border border-slate-200'
                               : u.isActive
                               ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
                               : 'bg-rose-100 text-rose-800 hover:bg-rose-200'
@@ -893,12 +1101,12 @@ Portal URL: ${origin}/login`;
                         >
                           {u.isActive ? (
                             <>
-                              <CheckCircle2 className="w-3 h-3" />
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                               <span>Active</span>
                             </>
                           ) : (
                             <>
-                              <XCircle className="w-3 h-3" />
+                              <XCircle className="w-3 h-3 text-rose-600" />
                               <span>Deactivated</span>
                             </>
                           )}
@@ -939,7 +1147,7 @@ Portal URL: ${origin}/login`;
                       </td>
 
                       <td className="py-4 px-4 text-center whitespace-nowrap">
-                        {u.role !== 'ADMIN' && (
+                        {u.role === 'USER' && (
                           latestExam ? (
                             <button
                               onClick={() => {
@@ -963,13 +1171,22 @@ Portal URL: ${origin}/login`;
                           <div className="flex items-center justify-center">
                             <span
                               className="inline-flex items-center space-x-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-500 border border-slate-200/80 cursor-not-allowed select-none"
-                              title="Administrator accounts cannot delete themselves"
+                              title="Your current signed-in account cannot be deleted"
                             >
                               <ShieldAlert className="w-3.5 h-3.5 text-slate-400 mr-1" />
-                              <span>Cannot delete self</span>
+                              <span>Current Session</span>
                             </span>
                           </div>
-                        ) : u.role !== 'ADMIN' ? (
+                        ) : isSuperAdminAccount ? (
+                          <div className="flex items-center justify-center">
+                            <span
+                              className="inline-flex items-center space-x-1 text-xs font-bold px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 cursor-not-allowed select-none"
+                              title="Super Administrator account is permanent and protected"
+                            >
+                              <span>👑 Super Admin</span>
+                            </span>
+                          </div>
+                        ) : canManageUser ? (
                           <div className="flex items-center justify-center space-x-2">
                             <button
                               onClick={() => handleToggleStatus(u.id, u.role)}
@@ -978,7 +1195,7 @@ Portal URL: ${origin}/login`;
                                   ? 'text-slate-600 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 border-slate-200'
                                   : 'text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
                               }`}
-                              title={u.isActive ? 'Deactivate candidate' : 'Activate candidate'}
+                              title={u.isActive ? `Deactivate ${u.role}` : `Activate ${u.role}`}
                             >
                               {u.isActive ? (
                                 <>
@@ -999,14 +1216,14 @@ Portal URL: ${origin}/login`;
                                 setDeleteError('');
                               }}
                               className="inline-flex items-center space-x-1.5 text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 px-2.5 py-1.5 rounded-lg transition-colors border border-rose-200 shadow-sm"
-                              title="Delete candidate"
+                              title={`Delete ${u.role}`}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                               <span>Delete</span>
                             </button>
                           </div>
                         ) : (
-                          <span className="text-xs text-slate-400 italic">Admin Account</span>
+                          <span className="text-xs text-slate-400 italic">Protected</span>
                         )}
                       </td>
                     </tr>
@@ -2001,6 +2218,213 @@ Portal URL: ${origin}/login`;
                         <>
                           <UserPlus className="w-4 h-4" />
                           <span>Save & Create Candidate</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Administrator Modal (Super Admin Only) */}
+      {isAddAdminOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-100 animate-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="px-6 py-5 bg-gradient-to-r from-purple-700 via-indigo-700 to-purple-800 text-white flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-white/10 rounded-2xl backdrop-blur-md">
+                  <Shield className="w-5 h-5 text-purple-200" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-lg text-white">Create New Administrator</h3>
+                  <p className="text-xs text-purple-200 mt-0.5">
+                    Super Admin Privilege · Provision new system administrator
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  resetAddAdminModal();
+                  setIsAddAdminOpen(false);
+                }}
+                className="p-1.5 rounded-xl hover:bg-white/10 text-white/80 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6">
+              {createdAdminResult ? (
+                <div className="space-y-5 animate-in fade-in">
+                  <div className="p-4 rounded-2xl bg-purple-50 border border-purple-200 text-purple-900 flex items-start space-x-3">
+                    <CheckCircle2 className="w-5 h-5 text-purple-600 shrink-0 mt-0.5" />
+                    <div className="text-xs space-y-1">
+                      <p className="font-extrabold text-sm text-purple-950">
+                        Administrator Created Successfully!
+                      </p>
+                      <p className="text-purple-700 leading-relaxed">
+                        Copy these credentials now to share with the administrator. Passwords cannot be retrieved once closed.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3 font-mono text-xs text-slate-700">
+                    <div className="flex justify-between items-center py-1 border-b border-slate-200/60">
+                      <span className="font-sans text-slate-400 font-semibold">Full Name:</span>
+                      <span className="font-bold text-slate-800 font-sans">{createdAdminResult.user.name}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-1 border-b border-slate-200/60">
+                      <span className="font-sans text-slate-400 font-semibold">Email:</span>
+                      <span className="font-bold text-slate-800">{createdAdminResult.user.email}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-1 border-b border-slate-200/60">
+                      <span className="font-sans text-slate-400 font-semibold">Temporary Password:</span>
+                      <span className="font-extrabold text-purple-700 bg-purple-100/70 px-2 py-0.5 rounded">
+                        {createdAdminResult.plainPassword}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center py-1">
+                      <span className="font-sans text-slate-400 font-semibold">Assigned Role:</span>
+                      <span className="font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded uppercase text-[10px]">
+                        ADMIN
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={handleCopyAdminCredentials}
+                      className="flex-1 inline-flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-white bg-purple-600 hover:bg-purple-700 shadow-md shadow-purple-600/20 transition-all text-xs"
+                    >
+                      {copiedAdminCreds ? (
+                        <>
+                          <Check className="w-4 h-4" />
+                          <span>Credentials Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-4 h-4" />
+                          <span>Copy Administrator Credentials</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => resetAddAdminModal()}
+                      className="px-4 py-2.5 rounded-xl font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors text-xs"
+                    >
+                      Create Another
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        resetAddAdminModal();
+                        setIsAddAdminOpen(false);
+                      }}
+                      className="px-4 py-2.5 rounded-xl font-bold text-slate-500 hover:text-slate-700 transition-colors text-xs"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={handleCreateAdmin} className="space-y-4">
+                  {addAdminError && (
+                    <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center space-x-2">
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>{addAdminError}</span>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                      Administrator Name <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. John Doe"
+                      value={adminName}
+                      onChange={(e) => setAdminName(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                      Email Address <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="admin@organization.com"
+                      value={adminEmail}
+                      onChange={(e) => setAdminEmail(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Password <span className="text-slate-400 font-normal">(Optional)</span>
+                      </label>
+                      <span className="text-[11px] text-slate-400">Leave blank to auto-generate</span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showAdminPassword ? 'text' : 'password'}
+                        placeholder="Leave blank for secure auto-generation"
+                        value={adminPassword}
+                        onChange={(e) => setAdminPassword(e.target.value)}
+                        className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAdminPassword(!showAdminPassword)}
+                        className="absolute right-3 top-3 text-slate-400 hover:text-slate-600"
+                      >
+                        {showAdminPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Min 6 characters if provided. If empty, a secure password will be generated for you.
+                    </p>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="pt-4 flex items-center justify-end space-x-3 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        resetAddAdminModal();
+                        setIsAddAdminOpen(false);
+                      }}
+                      className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSubmittingAdmin}
+                      className="px-5 py-2.5 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-xl shadow-md shadow-purple-600/20 transition-all flex items-center space-x-2 disabled:opacity-50"
+                    >
+                      {isSubmittingAdmin ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Creating Administrator...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Shield className="w-4 h-4" />
+                          <span>Save & Create Administrator</span>
                         </>
                       )}
                     </button>

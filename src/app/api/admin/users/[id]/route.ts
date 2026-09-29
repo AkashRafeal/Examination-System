@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromCookies } from '@/lib/auth/session';
+import { getSessionFromCookies, hasAdminAccess } from '@/lib/auth/session';
 import { toggleUserStatus, deleteUser } from '@/lib/services/user.service';
 
 export async function PATCH(
@@ -8,12 +8,12 @@ export async function PATCH(
 ) {
   try {
     const session = await getSessionFromCookies();
-    if (!session || session.role !== 'ADMIN') {
+    if (!session || !hasAdminAccess(session.role)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 403 });
     }
 
     const { id } = await params;
-    const updated = await toggleUserStatus(id);
+    const updated = await toggleUserStatus(id, session.role, session.userId);
     return NextResponse.json({ success: true, user: updated });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 400 });
@@ -26,7 +26,7 @@ export async function DELETE(
 ) {
   try {
     const session = await getSessionFromCookies();
-    if (!session || session.role !== 'ADMIN') {
+    if (!session || !hasAdminAccess(session.role)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 403 });
     }
 
@@ -40,7 +40,7 @@ export async function DELETE(
       );
     }
 
-    const deleted = await deleteUser(id, session.userId);
+    const deleted = await deleteUser(id, session.userId, session.role);
     return NextResponse.json({
       success: true,
       message: `User "${deleted.name}" has been permanently deleted.`,

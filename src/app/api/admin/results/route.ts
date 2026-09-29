@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromCookies } from '@/lib/auth/session';
+import { getSessionFromCookies, hasAdminAccess } from '@/lib/auth/session';
 import { getAssessmentResults } from '@/lib/services/evaluation.service';
 
 export async function GET(request: NextRequest) {
   try {
     const session = await getSessionFromCookies();
-    if (!session || session.role !== 'ADMIN') {
+    if (!session || !hasAdminAccess(session.role)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 403 });
     }
 
@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
       sortBy,
       sortOrder,
       batchId,
+      createdById: session.role === 'ADMIN' ? session.userId : undefined,
     });
 
     return NextResponse.json(data);

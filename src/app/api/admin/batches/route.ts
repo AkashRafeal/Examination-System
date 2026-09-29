@@ -1,19 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromCookies } from '@/lib/auth/session';
+import { getSessionFromCookies, hasAdminAccess } from '@/lib/auth/session';
 import { db } from '@/lib/db';
 
 export async function GET(_request: NextRequest) {
   try {
     const session = await getSessionFromCookies();
-    if (!session || session.role !== 'ADMIN') {
+    if (!session || !hasAdminAccess(session.role)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 403 });
     }
 
+    const where: any = {};
+    if (session.role === 'ADMIN') {
+      where.OR = [
+        { createdById: session.userId },
+        { users: { some: { createdById: session.userId } } },
+      ];
+    }
+
     const batches = await db.userBatch.findMany({
+      where,
       orderBy: { createdAt: 'desc' },
       include: {
-        _count: { select: { users: true } },
+        _count: {
+          select: {
+            users: session.role === 'ADMIN'
+              ? { where: { createdById: session.userId } }
+              : true,
+          },
+        },
         users: {
+          where: session.role === 'ADMIN' ? { createdById: session.userId } : undefined,
           select: {
             assessments: {
               select: {
@@ -24,7 +40,7 @@ export async function GET(_request: NextRequest) {
             },
           },
         },
-      },
+      } as any,
     });
 
     interface BatchRecord {

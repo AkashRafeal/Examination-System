@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromCookies } from '@/lib/auth/session';
+import { getSessionFromCookies, hasAdminAccess } from '@/lib/auth/session';
 import { db } from '@/lib/db';
 import * as XLSX from 'xlsx';
 
@@ -24,7 +24,7 @@ interface UserWithAssessments {
 export async function GET(request: NextRequest) {
   try {
     const session = await getSessionFromCookies();
-    if (!session || session.role !== 'ADMIN') {
+    if (!session || !hasAdminAccess(session.role)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 403 });
     }
 
@@ -42,8 +42,12 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch all users in the batch with their latest assessment
+    const userWhere: any = { batchId };
+    if (session.role === 'ADMIN') {
+      userWhere.createdById = session.userId;
+    }
     const users = await db.user.findMany({
-      where: { batchId },
+      where: userWhere,
       orderBy: { name: 'asc' },
       include: {
         assessments: {

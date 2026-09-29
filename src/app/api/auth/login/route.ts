@@ -51,6 +51,15 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    if (!user && identifier.startsWith('superadmin@')) {
+      user = await db.user.findFirst({
+        where: {
+          role: 'SUPER_ADMIN' as any,
+          isActive: true,
+        },
+      });
+    }
+
     if (!user) {
       return NextResponse.json({ error: 'Invalid username/email or password' }, { status: 401 });
     }

@@ -8,6 +8,7 @@ datasource db {
 }
 
 enum Role {
+  SUPER_ADMIN
   ADMIN
   USER
 }
@@ -28,39 +29,51 @@ model UserBatch {
   fileName        String
   batchName       String
   totalCandidates Int      @default(0)
+  createdById     String?
   createdAt       DateTime @default(now())
   users           User[]
 
   @@index([createdAt])
+  @@index([createdById])
 }
 
 model User {
-  id           String      @id @default(cuid())
-  name         String
-  email        String      @unique
-  passwordHash String
-  role         Role        @default(USER)
-  isActive     Boolean     @default(true)
-  batchId      String?
-  batch        UserBatch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
-  assessments  Assessment[]
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  id                String         @id @default(cuid())
+  name              String
+  email             String         @unique
+  passwordHash      String
+  role              Role           @default(USER)
+  isActive          Boolean        @default(true)
+  batchId           String?
+  batch             UserBatch?     @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  createdById       String?
+  creator           User?          @relation("CreatedUsers", fields: [createdById], references: [id], onDelete: SetNull)
+  createdUsers      User[]         @relation("CreatedUsers")
+  createdCategories Category[]     @relation("CreatedCategories")
+  createdQuestions  Question[]     @relation("CreatedQuestions")
+  createdBatches    ImportBatch[]  @relation("CreatedBatches")
+  assessments       Assessment[]
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
   @@index([email])
   @@index([role])
   @@index([batchId])
+  @@index([createdById])
 }
 
 model Category {
   id               String     @id @default(cuid())
-  name             String     @unique
+  name             String
   questionQuantity Int        @default(0) // Quantity of questions to ask candidates from this category
+  createdById      String?
+  creator          User?      @relation("CreatedCategories", fields: [createdById], references: [id], onDelete: SetNull)
   questions        Question[]
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
   @@index([name])
+  @@index([createdById])
 }
 
 model Question {
@@ -70,6 +83,8 @@ model Question {
   category            Category?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   difficulty          Difficulty           @default(MEDIUM)
   isActive            Boolean              @default(true)
+  createdById         String?
+  creator             User?                @relation("CreatedQuestions", fields: [createdById], references: [id], onDelete: SetNull)
   sourceFileName      String?
   sourceImportId      String?
   sourceImport        ImportBatch?         @relation(fields: [sourceImportId], references: [id], onDelete: SetNull)
@@ -82,6 +97,7 @@ model Question {
   @@index([isActive])
   @@index([difficulty])
   @@index([categoryId])
+  @@index([createdById])
 }
 
 model QuestionOption {
@@ -104,10 +120,13 @@ model ImportBatch {
   invalidQuestions  Int
   importedQuestions Int
   uploadedBy        String
+  createdById       String?
+  creator           User?      @relation("CreatedBatches", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt         DateTime   @default(now())
   questions         Question[]
 
   @@index([createdAt])
+  @@index([createdById])
 }
 
 model Assessment {

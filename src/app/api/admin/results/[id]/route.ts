@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromCookies } from '@/lib/auth/session';
-import { Role } from '@prisma/client';
+import { getSessionFromCookies, hasAdminAccess } from '@/lib/auth/session';
 import { getDetailedAssessmentResult } from '@/lib/services/evaluation.service';
 
 export async function GET(
@@ -9,7 +8,7 @@ export async function GET(
 ) {
   try {
     const session = await getSessionFromCookies();
-    if (!session || session.role !== Role.ADMIN) {
+    if (!session || !hasAdminAccess(session.role)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 403 });
     }
 

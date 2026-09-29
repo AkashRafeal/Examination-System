@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromCookies } from '@/lib/auth/session';
-import { Role } from '@prisma/client';
+import { getSessionFromCookies, hasAdminAccess } from '@/lib/auth/session';
 import {
   extractTextFromBuffer,
   parseQuestionsFromText,
@@ -13,7 +12,7 @@ const MAX_BYTES = MAX_SIZE_MB * 1024 * 1024;
 export async function POST(request: NextRequest) {
   try {
     const session = await getSessionFromCookies();
-    if (!session || session.role !== Role.ADMIN) {
+    if (!session || !hasAdminAccess(session.role)) {
       return NextResponse.json({ error: 'Unauthorized: Admin access required.' }, { status: 403 });
     }
 

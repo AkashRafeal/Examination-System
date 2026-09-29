@@ -22,12 +22,17 @@ interface Category {
   id: string;
   name: string;
   questionQuantity: number;
+  createdById?: string | null;
+  creator?: { id: string; name: string; email: string } | null;
   _count: { questions: number };
   activeQuestionsCount: number;
 }
 
 export default function CategoriesPage() {
+  const [currentUser, setCurrentUser] = useState<{ id: string; email: string; name: string; role: 'SUPER_ADMIN' | 'ADMIN' | 'USER' } | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [selectedAdminId, setSelectedAdminId] = useState('');
+  const [availableAdmins, setAvailableAdmins] = useState<{ id: string; name: string; email: string }[]>([]);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryQuantity, setNewCategoryQuantity] = useState<number>(0);
@@ -40,11 +45,32 @@ export default function CategoriesPage() {
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
+  useEffect(() => {
+    async function fetchCurrentUser() {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authenticated && data.user) {
+            setCurrentUser(data.user);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching current user:', err);
+      }
+    }
+    fetchCurrentUser();
+  }, []);
+
   const loadCategories = async () => {
     try {
-      const res = await fetch('/api/admin/categories');
+      const query = selectedAdminId ? `?adminId=${selectedAdminId}` : '';
+      const res = await fetch(`/api/admin/categories${query}`);
       const data = await res.json();
       const list: Category[] = data.categories || [];
+      if (data.admins) {
+        setAvailableAdmins(data.admins);
+      }
       setCategories(list);
 
       // Initialize quantities map
@@ -63,7 +89,7 @@ export default function CategoriesPage() {
 
   useEffect(() => {
     loadCategories();
-  }, []);
+  }, [selectedAdminId]);
 
   const handleQuantityChange = (id: string, value: number) => {
     const val = Math.max(0, isNaN(value) ? 0 : value);
@@ -223,8 +249,9 @@ export default function CategoriesPage() {
           Question Categories & Exam Distribution
         </h1>
         <p className="text-sm text-slate-500 mt-1 max-w-3xl">
-          Organize questions by subject and configure the exact quantity of questions to pull from each
-          category when a candidate takes an assessment.
+          {currentUser?.role === 'SUPER_ADMIN'
+            ? 'Configure and organize examination categories and question quota distributions across the platform'
+            : 'Configure and organize your examination categories and question quota distributions'}
         </p>
       </div>
 
@@ -417,6 +444,22 @@ export default function CategoriesPage() {
               )}
             </div>
 
+            {/* Admin Filter Dropdown (Super Admin Only) */}
+            {currentUser?.role === 'SUPER_ADMIN' && (
+              <select
+                value={selectedAdminId}
+                onChange={(e) => setSelectedAdminId(e.target.value)}
+                className="px-3 py-1.5 h-9 rounded-xl border border-slate-300 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white text-slate-800"
+              >
+                <option value="">All Admins (All Categories)</option>
+                {availableAdmins.map((adm) => (
+                  <option key={adm.id} value={adm.id}>
+                    Admin: {adm.name} ({adm.email})
+                  </option>
+                ))}
+              </select>
+            )}
+
             {/* Quick Filter Status Tabs */}
             <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200/80 text-xs">
               <button
@@ -494,6 +537,9 @@ export default function CategoriesPage() {
               <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 text-[11px] font-bold uppercase tracking-wider">
                 <tr>
                   <th className="py-3 px-6">Category Name</th>
+                  {currentUser?.role === 'SUPER_ADMIN' && (
+                    <th className="py-3 px-4 text-left">Created By (Admin)</th>
+                  )}
                   <th className="py-3 px-4 text-center">Questions in Bank</th>
                   <th className="py-3 px-6 text-center">Questions to Ask Candidate</th>
                   <th className="py-3 px-4 text-center">Share of Exam</th>
@@ -525,6 +571,19 @@ export default function CategoriesPage() {
                           </div>
                         </div>
                       </td>
+
+                      {currentUser?.role === 'SUPER_ADMIN' && (
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          {c.creator ? (
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-slate-800">{c.creator.name}</span>
+                              <span className="text-[10px] text-slate-400 font-mono">{c.creator.email}</span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400 italic">System</span>
+                          )}
+                        </td>
+                      )}
 
                       <td className="py-3.5 px-4 text-center whitespace-nowrap">
                         <span

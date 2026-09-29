@@ -153,7 +153,11 @@ export function parseCandidateWorkbook(buffer: Buffer): RawCandidateRow[] {
  * Imports candidates, generates usernames/passwords, persists in DB,
  * and compiles the credentials CSV for the administrator.
  */
-export async function importCandidatesFromBuffer(buffer: Buffer, originalFileName: string = 'candidates'): Promise<ImportRosterResult> {
+export async function importCandidatesFromBuffer(
+  buffer: Buffer,
+  originalFileName: string = 'candidates',
+  createdById?: string
+): Promise<ImportRosterResult> {
   const rawCandidates = parseCandidateWorkbook(buffer);
 
   // Fetch existing users to avoid username/email collisions
@@ -192,7 +196,8 @@ export async function importCandidatesFromBuffer(buffer: Buffer, originalFileNam
       fileName: originalFileName,
       batchName,
       totalCandidates: 0, // Will be updated after processing
-    },
+      createdById: createdById || null,
+    } as any,
   });
 
   let totalCreated = 0;
@@ -232,7 +237,8 @@ export async function importCandidatesFromBuffer(buffer: Buffer, originalFileNam
           role: 'USER',
           isActive: true,
           batchId: userBatch.id,
-        },
+          createdById: createdById || null,
+        } as any,
       });
 
       existingEmails.add(email);

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromCookies } from '@/lib/auth/session';
-import { Role } from '@prisma/client';
+import { getSessionFromCookies, hasAdminAccess } from '@/lib/auth/session';
 import { allowUserRetake } from '@/lib/services/assessment.service';
 import { z } from 'zod';
 
@@ -14,7 +13,7 @@ const retakeSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const session = await getSessionFromCookies();
-    if (!session || session.role !== Role.ADMIN) {
+    if (!session || !hasAdminAccess(session.role)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 403 });
     }
 

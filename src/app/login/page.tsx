@@ -65,7 +65,7 @@ function LoginForm() {
 
       if (redirect) {
         window.location.href = redirect;
-      } else if (data.user.role === 'ADMIN') {
+      } else if (data.user.role === 'ADMIN' || data.user.role === 'SUPER_ADMIN') {
         window.location.href = '/admin/dashboard';
       } else {
         window.location.href = '/user/dashboard';
@@ -100,12 +100,12 @@ function LoginForm() {
                   Already signed in as <span className="underline">{activeSession.name}</span>
                 </p>
                 <p className="text-[11px] text-blue-700 font-mono mt-0.5">
-                  {activeSession.email} · {activeSession.role}
+                  {activeSession.email} · {activeSession.role === 'SUPER_ADMIN' ? '👑 SUPER ADMIN' : activeSession.role}
                 </p>
               </div>
               <div className="flex items-center space-x-2">
                 <Link
-                  href={activeSession.role === 'ADMIN' ? '/admin/dashboard' : '/user/dashboard'}
+                  href={activeSession.role === 'ADMIN' || activeSession.role === 'SUPER_ADMIN' ? '/admin/dashboard' : '/user/dashboard'}
                   className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition shadow-sm"
                 >
                   Go to Dashboard
@@ -182,11 +182,6 @@ function LoginForm() {
             </button>
           </form>
 
-</div>
-
-        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-center text-xs text-slate-500 leading-relaxed">
-          <span className="font-semibold text-slate-700 block mb-0.5">Need examination access?</span>
-          Candidate accounts are provisioned and distributed exclusively by the examination administrator. Contact your institution administrator if you do not have credentials.
         </div>
       </div>
     </div>

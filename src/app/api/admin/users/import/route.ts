@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromCookies } from '@/lib/auth/session';
+import { getSessionFromCookies, hasAdminAccess } from '@/lib/auth/session';
 import { importCandidatesFromBuffer } from '@/lib/services/user-import.service';
 
 export async function POST(request: NextRequest) {
   try {
     const session = await getSessionFromCookies();
-    if (!session || session.role !== 'ADMIN') {
+    if (!session || !hasAdminAccess(session.role)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 403 });
     }
 
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const result = await importCandidatesFromBuffer(buffer, file.name);
+    const result = await importCandidatesFromBuffer(buffer, file.name, session.userId);
 
     return NextResponse.json({
       success: true,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromCookies } from '@/lib/auth/session';
-import { Role, Difficulty } from '@prisma/client';
+import { getSessionFromCookies, hasAdminAccess } from '@/lib/auth/session';
+import { Difficulty } from '@prisma/client';
 import { getQuestions, createQuestion, deleteQuestions } from '@/lib/services/question.service';
 import { z } from 'zod';
 
@@ -20,10 +20,12 @@ const createQuestionSchema = z.object({
     .length(4, 'Exactly 4 options (A, B, C, D) are required'),
 });
 
+import { db } from '@/lib/db';
+
 export async function GET(request: NextRequest) {
   try {
     const session = await getSessionFromCookies();
-    if (!session || session.role !== Role.ADMIN) {
+    if (!session || !hasAdminAccess(session.role)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 403 });
     }
 
@@ -38,17 +40,35 @@ export async function GET(request: NextRequest) {
       isActiveParam !== null && isActiveParam !== undefined && isActiveParam !== ''
         ? isActiveParam === 'true'
         : undefined;
+    const adminId = searchParams.get('adminId') || undefined;
 
-    const data = await getQuestions({
-      page,
-      limit,
-      search,
-      categoryId,
-      difficulty,
-      isActive,
+    // Regular ADMIN can ONLY see questions created by them
+    // SUPER_ADMIN sees all, or can filter by specific adminId
+    const createdById = session.role === 'ADMIN' ? session.userId : (adminId || undefined);
+
+    const [data, admins] = await Promise.all([
+      getQuestions({
+        page,
+        limit,
+        search,
+        categoryId,
+        difficulty,
+        isActive,
+        createdById,
+      }),
+      session.role === 'SUPER_ADMIN'
+        ? db.user.findMany({
+            where: { role: 'ADMIN' },
+            select: { id: true, name: true, email: true },
+            orderBy: { name: 'asc' },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    return NextResponse.json({
+      ...data,
+      admins,
     });
-
-    return NextResponse.json(data);
   } catch (error: any) {
     console.error('Error fetching questions:', error);
     return NextResponse.json({ error: 'Failed to fetch questions' }, { status: 500 });
@@ -58,7 +78,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const session = await getSessionFromCookies();
-    if (!session || session.role !== Role.ADMIN) {
+    if (!session || !hasAdminAccess(session.role)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 403 });
     }
 
@@ -81,7 +101,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const created = await createQuestion(result.data);
+    const created = await createQuestion({
+      ...result.data,
+      createdById: session.userId,
+    });
     return NextResponse.json({ success: true, data: created }, { status: 201 });
   } catch (error: any) {
     console.error('Error creating question:', error);
@@ -95,7 +118,7 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const session = await getSessionFromCookies();
-    if (!session || session.role !== Role.ADMIN) {
+    if (!session || !hasAdminAccess(session.role)) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 403 });
     }
 
@@ -109,10 +132,12 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
+    const createdById = session.role === 'ADMIN' ? session.userId : undefined;
+
     const result = await deleteQuestions(
       all
-        ? { all: true, categoryId: categoryId || undefined, isActive, search }
-        : { ids: questionIds }
+        ? { all: true, categoryId: categoryId || undefined, isActive, search, createdById }
+        : { ids: questionIds, createdById }
     );
 
     return NextResponse.json({

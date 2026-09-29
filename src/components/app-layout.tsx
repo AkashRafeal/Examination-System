@@ -23,7 +23,7 @@ interface UserSession {
   id: string;
   name: string;
   email: string;
-  role: 'ADMIN' | 'USER';
+  role: 'SUPER_ADMIN' | 'ADMIN' | 'USER';
 }
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -103,7 +103,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     { href: '/user/dashboard', label: 'Candidate Dashboard', icon: LayoutDashboard },
   ];
 
-  const links = user?.role === 'ADMIN' ? adminLinks : userLinks;
+  const isAdminUser = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+  const links = isAdminUser ? adminLinks : userLinks;
 
   // Helper to ensure ONLY ONE tab is active at a time (exact match or most specific prefix match)
   const getActiveHref = (path: string, items: typeof links): string | null => {
@@ -269,13 +270,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // 4. Authenticated Administrators (Role: ADMIN): LEFT SIDEBAR LAYOUT
+  // 4. Authenticated Administrators (Role: ADMIN or SUPER_ADMIN): LEFT SIDEBAR LAYOUT
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-50">
       {/* Mobile Top Bar */}
       <header className="md:hidden bg-white border-b border-slate-200 sticky top-0 z-40 px-4 h-16 flex items-center justify-between">
         <Link
-          href={user.role === 'ADMIN' ? '/admin/dashboard' : '/user/dashboard'}
+          href={user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin/dashboard' : '/user/dashboard'}
           className="flex items-center space-x-2.5"
         >
           <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-sm">
@@ -384,7 +385,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="space-y-8">
           {/* Brand Logo & Title */}
           <Link
-            href={user.role === 'ADMIN' ? '/admin/dashboard' : '/user/dashboard'}
+            href={user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin/dashboard' : '/user/dashboard'}
             className="flex items-center space-x-3 focus:outline-none group"
           >
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-blue-500/25 transition-transform group-hover:scale-105">
@@ -403,7 +404,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {/* Navigation Menu */}
           <nav className="space-y-1.5">
             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-3 mb-2.5">
-              {user.role === 'ADMIN' ? 'Administration Menu' : 'Candidate Menu'}
+              {user.role === 'SUPER_ADMIN' ? 'Super Admin Console' : user.role === 'ADMIN' ? 'Administration Menu' : 'Candidate Menu'}
             </div>
 
             {links.map((link) => {
@@ -440,7 +441,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 flex items-center space-x-3">
             <div
               className={`w-10 h-10 rounded-xl flex items-center justify-center font-extrabold text-sm shadow-sm ${
-                user.role === 'ADMIN'
+                user.role === 'SUPER_ADMIN'
+                  ? 'bg-gradient-to-tr from-amber-500 to-orange-500 text-white shadow-amber-500/20'
+                  : user.role === 'ADMIN'
                   ? 'bg-purple-100 text-purple-700'
                   : 'bg-emerald-100 text-emerald-700'
               }`}
@@ -452,13 +455,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <div className="text-xs font-bold text-slate-900 truncate">{user.name}</div>
               <div className="text-[11px] text-slate-400 truncate">{user.email}</div>
               <span
-                className={`inline-block mt-1 text-[9px] font-extrabold px-1.5 py-0.2 rounded-full uppercase tracking-wider ${
-                  user.role === 'ADMIN'
+                className={`inline-block mt-1 text-[9px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                  user.role === 'SUPER_ADMIN'
+                    ? 'bg-amber-100 text-amber-800 border border-amber-300 font-extrabold'
+                    : user.role === 'ADMIN'
                     ? 'bg-purple-100 text-purple-700'
                     : 'bg-emerald-100 text-emerald-700'
                 }`}
               >
-                {user.role}
+                {user.role === 'SUPER_ADMIN' ? '👑 SUPER ADMIN' : user.role}
               </span>
             </div>
           </div>

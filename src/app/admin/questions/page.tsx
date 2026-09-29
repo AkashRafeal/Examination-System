@@ -29,14 +29,39 @@ interface QuestionItem {
   difficulty: 'EASY' | 'MEDIUM' | 'HARD';
   isActive: boolean;
   createdAt: string;
+  creator?: {
+    id: string;
+    name: string;
+    email: string;
+  } | null;
   options: { id: string; optionKey: string; optionText: string; isCorrect: boolean }[];
 }
 
 export default function QuestionBankPage() {
+  const [currentUser, setCurrentUser] = useState<{ id: string; email: string; name: string; role: 'SUPER_ADMIN' | 'ADMIN' | 'USER' } | null>(null);
   const [questions, setQuestions] = useState<QuestionItem[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [selectedAdminId, setSelectedAdminId] = useState('');
+  const [availableAdmins, setAvailableAdmins] = useState<{ id: string; name: string; email: string }[]>([]);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    async function fetchCurrentUser() {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authenticated && data.user) {
+            setCurrentUser(data.user);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching current user:', err);
+      }
+    }
+    fetchCurrentUser();
+  }, []);
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -79,7 +104,8 @@ export default function QuestionBankPage() {
   useEffect(() => {
     async function loadCategories() {
       try {
-        const res = await fetch('/api/admin/categories');
+        const query = selectedAdminId ? `?adminId=${selectedAdminId}` : '';
+        const res = await fetch(`/api/admin/categories${query}`);
         const data = await res.json();
         setCategories(data.categories || []);
       } catch (err) {
@@ -87,7 +113,7 @@ export default function QuestionBankPage() {
       }
     }
     loadCategories();
-  }, []);
+  }, [selectedAdminId]);
 
   const fetchQuestions = useCallback(async () => {
     setLoading(true);
@@ -98,11 +124,15 @@ export default function QuestionBankPage() {
       if (search) params.set('search', search);
       if (selectedCategory) params.set('categoryId', selectedCategory);
       if (selectedStatus) params.set('isActive', selectedStatus);
+      if (selectedAdminId) params.set('adminId', selectedAdminId);
 
       const res = await fetch(`/api/admin/questions?${params.toString()}`);
       const data = await res.json();
 
       setQuestions(data.questions || []);
+      if (data.admins) {
+        setAvailableAdmins(data.admins);
+      }
       setTotalPages(data.pagination?.totalPages || 1);
       setTotalQuestions(data.pagination?.total || 0);
     } catch (err) {
@@ -110,7 +140,7 @@ export default function QuestionBankPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, selectedCategory, selectedStatus]);
+  }, [page, search, selectedCategory, selectedStatus, selectedAdminId]);
 
   useEffect(() => {
     fetchQuestions();
@@ -224,7 +254,9 @@ export default function QuestionBankPage() {
             Question Bank
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Manage repository of multiple-choice examination questions ({totalQuestions} total)
+            {currentUser?.role === 'SUPER_ADMIN'
+              ? `Manage and curate all examination questions across the platform (${totalQuestions} total)`
+              : `Manage and curate examination questions added by you (${totalQuestions} total)`}
           </p>
         </div>
 
@@ -309,7 +341,7 @@ export default function QuestionBankPage() {
 
       {/* Filters & Search Toolbar */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className={`grid grid-cols-1 ${currentUser?.role === 'SUPER_ADMIN' ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-3`}>
           {/* Search */}
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
@@ -356,6 +388,28 @@ export default function QuestionBankPage() {
             <option value="true">Active Only</option>
             <option value="false">Inactive Only</option>
           </select>
+
+          {/* Admin Filter (Super Admin Only) */}
+          {currentUser?.role === 'SUPER_ADMIN' && (
+            <select
+              value={selectedAdminId}
+              onChange={(e) => {
+                setSelectedAdminId(e.target.value);
+                setSelectedCategory('');
+                setSelectedQuestionIds([]);
+                setSelectAllAcrossPages(false);
+                setPage(1);
+              }}
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-700 bg-white"
+            >
+              <option value="">All Admins (All Questions)</option>
+              {availableAdmins.map((adm) => (
+                <option key={adm.id} value={adm.id}>
+                  Admin: {adm.name} ({adm.email})
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         {/* Category & Filter Count Bar with Quick Select All */}
@@ -490,6 +544,9 @@ export default function QuestionBankPage() {
                   )}
                   <th className={`py-3.5 ${!isDeleteMode ? 'pl-6 pr-4' : 'px-4'} w-full`}>Question</th>
                   <th className="py-3.5 px-4 w-px whitespace-nowrap text-left">Category</th>
+                  {currentUser?.role === 'SUPER_ADMIN' && (
+                    <th className="py-3.5 px-4 w-px whitespace-nowrap text-left">Created By (Admin)</th>
+                  )}
                   <th className="py-3.5 px-4 w-px whitespace-nowrap text-left">Status</th>
                   <th className="py-3.5 px-4 w-px whitespace-nowrap text-left">Created</th>
                   <th className="py-3.5 pl-3 pr-6 w-px whitespace-nowrap text-right">Actions</th>
@@ -541,6 +598,19 @@ export default function QuestionBankPage() {
                           </span>
                         )}
                       </td>
+
+                      {currentUser?.role === 'SUPER_ADMIN' && (
+                        <td className="py-4 px-4 w-px whitespace-nowrap">
+                          {q.creator ? (
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-slate-800">{q.creator.name}</span>
+                              <span className="text-[10px] text-slate-400 font-mono">{q.creator.email}</span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400 italic">System</span>
+                          )}
+                        </td>
+                      )}
 
                       <td className="py-4 px-4 w-px whitespace-nowrap">
                         <button

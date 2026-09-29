@@ -20,7 +20,7 @@ interface UserSession {
   id: string;
   name: string;
   email: string;
-  role: 'ADMIN' | 'USER';
+  role: 'SUPER_ADMIN' | 'ADMIN' | 'USER';
 }
 
 export default function Navbar() {
@@ -104,7 +104,8 @@ export default function Navbar() {
     { href: '/user/dashboard', label: 'Candidate Dashboard', icon: LayoutDashboard },
   ];
 
-  const links = user?.role === 'ADMIN' ? adminLinks : userLinks;
+  const isAdminUser = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+  const links = isAdminUser ? adminLinks : userLinks;
 
   const getActiveHref = (path: string, items: typeof links): string | null => {
     const exact = items.find((item) => path === item.href);
@@ -134,7 +135,7 @@ export default function Navbar() {
           {/* Brand */}
           <div className="flex items-center space-x-8">
             <Link
-              href={user?.role === 'ADMIN' ? '/admin/dashboard' : user ? '/user/dashboard' : '/'}
+              href={isAdminUser ? '/admin/dashboard' : user ? '/user/dashboard' : '/'}
               className="flex items-center space-x-2.5 focus:outline-none"
             >
               <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
@@ -185,13 +186,15 @@ export default function Navbar() {
                   </div>
                   <div className="flex items-center justify-end space-x-1.5 mt-0.5">
                     <span
-                      className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full uppercase tracking-wider ${
-                        user.role === 'ADMIN'
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                        user.role === 'SUPER_ADMIN'
+                          ? 'bg-amber-100 text-amber-800 border border-amber-300 font-extrabold'
+                          : user.role === 'ADMIN'
                           ? 'bg-purple-100 text-purple-700 border border-purple-200'
                           : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
                       }`}
                     >
-                      {user.role}
+                      {user.role === 'SUPER_ADMIN' ? '👑 SUPER ADMIN' : user.role}
                     </span>
                     <span className="text-xs text-slate-400">•</span>
                     <span className="text-xs text-slate-500 truncate max-w-[150px]">

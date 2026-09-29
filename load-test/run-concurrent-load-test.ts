@@ -16,7 +16,7 @@ interface RequestMetrics {
   scenario: string;
 }
 
-const BASE_URL = process.env.LOAD_TEST_URL || 'http://localhost:3001';
+const BASE_URL = process.env.LOAD_TEST_URL || 'http://localhost:3002';
 const CONCURRENT_USERS = parseInt(process.env.CONCURRENT_USERS || '200', 10);
 const CANDIDATE_START_OFFSET = parseInt(process.env.CANDIDATE_START_OFFSET || '200', 10);
 

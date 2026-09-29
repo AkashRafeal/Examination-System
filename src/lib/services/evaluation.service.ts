@@ -8,6 +8,7 @@ export interface ResultFilters {
   sortBy?: 'score' | 'submittedAt' | 'percentage';
   sortOrder?: 'asc' | 'desc';
   batchId?: string;
+  createdById?: string;
 }
 
 export async function getAssessmentResults(filters: ResultFilters) {
@@ -15,7 +16,7 @@ export async function getAssessmentResults(filters: ResultFilters) {
   const limit = filters.limit || 20;
   const skip = (page - 1) * limit;
 
-  const where: Prisma.AssessmentWhereInput = {
+  const where: any = {
     status: 'COMPLETED',
   };
 
@@ -31,14 +32,28 @@ export async function getAssessmentResults(filters: ResultFilters) {
   if (filters.batchId) {
     const batchCondition = { batchId: filters.batchId };
     if (where.user) {
-      // Combine existing user filter with batchId using AND
       where.AND = [
-        { user: where.user as object },
+        { user: where.user },
         { user: batchCondition },
       ];
       delete where.user;
     } else {
       where.user = batchCondition;
+    }
+  }
+
+  if (filters.createdById) {
+    const creatorCondition = { createdById: filters.createdById };
+    if (where.AND) {
+      where.AND.push({ user: creatorCondition });
+    } else if (where.user) {
+      where.AND = [
+        { user: where.user },
+        { user: creatorCondition },
+      ];
+      delete where.user;
+    } else {
+      where.user = creatorCondition;
     }
   }
 
@@ -173,9 +188,14 @@ export async function getDetailedAssessmentResult(assessmentId: string) {
 /**
  * Generates CSV string of assessment results for Admin export.
  */
-export async function generateResultsCSV(): Promise<string> {
+export async function generateResultsCSV(createdById?: string): Promise<string> {
+  const where: any = { status: 'COMPLETED' };
+  if (createdById) {
+    where.user = { createdById };
+  }
+
   const assessments = await db.assessment.findMany({
-    where: { status: 'COMPLETED' },
+    where,
     orderBy: { submittedAt: 'desc' },
     include: {
       user: {

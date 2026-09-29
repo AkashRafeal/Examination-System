@@ -526,7 +526,7 @@ export default function AssessmentRunnerPage({
                 </div>
               </div>
 
-              {/* 50-Question Interactive Grid */}
+              {/* Question Navigation Grid */}
               <div className="grid grid-cols-5 sm:grid-cols-10 lg:grid-cols-5 gap-2 max-h-[360px] overflow-y-auto pr-1">
                 {questions.map((q, idx) => {
                   const isAnswered = !!selectedAnswers[q.id];
